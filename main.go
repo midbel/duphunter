@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -19,10 +20,6 @@ type Info struct {
 	time.Time
 }
 
-func (i Info) String() string {
-	return i.Name
-}
-
 func main() {
 	by := flag.String("b", "", "compare files by hash or properties")
 	flag.Parse()
@@ -32,20 +29,97 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	c := struct {
+		Uniq int64
+		Dupl int64
+		Size int64
+	}{}
 	for n := range files {
 		fs := files[n]
-		if len(fs) == 1 {
-			fmt.Printf("%s: OK\n", fs[0])
+		if n := len(fs); n == 1 {
+			printLine(fs[0], false)
+			c.Size += fs[0].Size
 		} else {
-			fmt.Printf("%s (%d)\n", fs[0], len(fs))
-			for i := 1; i < len(fs); i++ {
-				fmt.Printf("> %s: duplicate\n", fs[i])
+			for i := 0; i < n; i++ {
+				printLine(fs[i], true)
+				c.Dupl++
+				c.Size += fs[i].Size
 			}
+			c.Dupl--
+		}
+		c.Uniq++
+	}
+	if c.Dupl < 0 {
+		c.Dupl = 0
+	}
+	fmt.Printf("%d files scanned - found %d duplicates\n", c.Uniq, c.Dupl)
+}
+
+var (
+	green = []byte{0x1b, '[', '3', '2', ';', '1', '0', '7', 'm'}
+	red   = []byte{0x1b, '[', '3', '1', ';', '1', '0', '7', 'm'}
+	reset = []byte{0x1b, '[', '0', 'm'}
+)
+
+const (
+	OK = "[ OK ] "
+	KO = "[ KO ] "
+)
+
+func printLine(n Info, dup bool) {
+	var line bytes.Buffer
+	if !dup {
+		line.Write(green)
+		line.WriteString(OK)
+	} else {
+		line.Write(red)
+		line.WriteString(KO)
+	}
+	line.Write(reset)
+	line.WriteString(fmt.Sprintf("%016x  %s\n", n.Sum, n.Name))
+
+	io.Copy(os.Stdout, &line)
+}
+
+func progress(done <-chan int) {
+	clear := func() int {
+		os.Stdout.Write([]byte{0x1b, '[', '1', 'K'})
+		os.Stdout.Write([]byte{0x1b, '[', '1', 'E'})
+		return 0
+	}
+	tick := time.Tick(time.Millisecond * 750)
+	defer clear()
+	var (
+		count int
+		size  int
+		tmp   int
+	)
+	for {
+		select {
+		case <-tick:
+			tmp++
+			if tmp > 0 && tmp%4 == 0 {
+				tmp = clear()
+				io.WriteString(os.Stdout, fmt.Sprintf("%d files scanned (%dMB)", count, size>>20))
+			} else {
+				os.Stdout.Write([]byte("."))
+			}
+		case n, ok := <-done:
+			if !ok {
+				return
+			}
+			size += n
+			count++
+		default:
 		}
 	}
 }
 
 func scanFiles(dir, by string) (map[Info][]Info, error) {
+	quit := make(chan int, 100)
+	defer close(quit)
+	go progress(quit)
+
 	var groupby func(Info) Info
 	switch strings.ToLower(by) {
 	case "", "hash":
@@ -58,6 +132,7 @@ func scanFiles(dir, by string) (map[Info][]Info, error) {
 
 	files := make(map[Info][]Info)
 	digest := xxh.New64(0)
+	buffer := make([]byte, 4<<10)
 
 	err := filepath.Walk(dir, func(p string, i os.FileInfo, err error) error {
 		if err != nil || i.IsDir() {
@@ -70,7 +145,7 @@ func scanFiles(dir, by string) (map[Info][]Info, error) {
 			return err
 		}
 		defer r.Close()
-		if _, err := io.Copy(digest, r); err != nil {
+		if _, err := io.CopyBuffer(digest, r, buffer); err != nil {
 			return err
 		}
 
@@ -82,6 +157,8 @@ func scanFiles(dir, by string) (map[Info][]Info, error) {
 		}
 		k := groupby(n)
 		files[k] = append(files[k], n)
+
+		quit <- int(n.Size)
 
 		return nil
 	})
