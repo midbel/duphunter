@@ -36,17 +36,12 @@ func main() {
 	}{}
 	for n := range files {
 		fs := files[n]
-		if n := len(fs); n == 1 {
-			printLine(fs[0], false)
+		for i, z := 0, len(fs); i < z; i++ {
+			printLine(fs[i], z > 1)
 			c.Size += fs[0].Size
-		} else {
-			for i := 0; i < n; i++ {
-				printLine(fs[i], true)
-				c.Dupl++
-				c.Size += fs[i].Size
-			}
-			c.Dupl--
+			c.Dupl++
 		}
+		c.Dupl--
 		c.Uniq++
 	}
 	if c.Dupl < 0 {
@@ -56,14 +51,16 @@ func main() {
 }
 
 var (
-	green = []byte{0x1b, '[', '3', '2', ';', '1', '0', '7', 'm'}
-	red   = []byte{0x1b, '[', '3', '1', ';', '1', '0', '7', 'm'}
+	// green = []byte{0x1b, '[', '3', '2', ';', '1', '0', '7', 'm'}
+	// red   = []byte{0x1b, '[', '3', '1', ';', '1', '0', '7', 'm'}
+	green = []byte{0x1b, '[', '3', '8', ';', '5', ';', '2', 'm'}
+	red   = []byte{0x1b, '[', '3', '8', ';', '5', ';', '1', 'm'}
 	reset = []byte{0x1b, '[', '0', 'm'}
 )
 
 const (
-	OK = "[ OK ] "
-	KO = "[ KO ] "
+	OK = "[ OK ]"
+	KO = "[ KO ]"
 )
 
 func printLine(n Info, dup bool) {
@@ -76,9 +73,41 @@ func printLine(n Info, dup bool) {
 		line.WriteString(KO)
 	}
 	line.Write(reset)
-	line.WriteString(fmt.Sprintf("%016x  %s\n", n.Sum, n.Name))
+	line.WriteString(fmt.Sprintf(" %016x  %s  %s\n", n.Sum, prettySize(n.Size), n.Name))
 
 	io.Copy(os.Stdout, &line)
+}
+
+const (
+	ten  = 10
+	kibi = 1000
+	mebi = kibi * kibi
+	gibi = mebi * kibi
+)
+
+func prettySize(v int64) string {
+	var (
+		unit byte
+		mod  int64
+		div  int64
+	)
+
+	div = 1
+	switch {
+	default:
+		mod, unit = 1, 'B'
+	case v >= kibi && v < mebi:
+		mod, div, unit = kibi, 10, 'K'
+	case v >= mebi && v < gibi:
+		mod, div, unit = mebi, 10000, 'M'
+	case v >= gibi:
+		mod, unit = gibi, 'G'
+	}
+	rest := (v % mod) / div
+	if rest < ten {
+		rest *= ten
+	}
+	return fmt.Sprintf("%3d.%02d%c", v/mod, rest, unit)
 }
 
 func progress(done <-chan int) {
