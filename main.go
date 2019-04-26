@@ -25,6 +25,23 @@ type Info struct {
 	time.Time
 }
 
+func (i *Info) Uniq() bool {
+	return i.Seen <= 1
+}
+
+func (i *Info) Update() error {
+	digest := xxh.New64(0)
+
+	r, err := os.Open(i.Name)
+	if err != nil {
+		return err
+	}
+	if _, err = io.Copy(digest, r); err == nil {
+		i.Sum = digest.Sum64()
+	}
+	return err
+}
+
 func main() {
 	del := flag.Bool("d", false, "delete duplicate files")
 	flag.Parse()
@@ -37,7 +54,7 @@ func main() {
 	line := linewriter.NewWriter(1024, linewriter.WithPadding([]byte(" ")))
 	for n := range checkFiles(scanFiles(flag.Args())) {
 		var state string
-		if n.Seen > 1 {
+		if !n.Uniq() {
 			state = KO
 			c.Dupl++
 		} else {
@@ -66,16 +83,15 @@ func checkFiles(files <-chan Info) <-chan Info {
 
 		seen := make(map[uint64]int)
 		for f := range files {
-			r, err := os.Open(f.Name)
+			err := f.Update()
 			if err != nil {
 				return
 			}
-			if n, err := updateInfo(r, f); err == nil {
-				seen[n.Sum]++
-				n.Seen = seen[n.Sum]
 
-				queue <- n
-			}
+			seen[f.Sum]++
+			f.Seen = seen[f.Sum]
+
+			queue <- f
 		}
 	}()
 	return queue
@@ -94,29 +110,14 @@ func scanFiles(dirs []string) <-chan Info {
 				if i.IsDir() {
 					return nil
 				}
-				queue <- infoFromInfo(p, i)
+				queue <- Info{
+					Name: p,
+					Size: i.Size(),
+					Time: i.ModTime(),
+				}
 				return nil
 			})
 		}
 	}()
 	return queue
-}
-
-func infoFromInfo(p string, i os.FileInfo) Info {
-	return Info{
-		Name: p,
-		Size: i.Size(),
-		Time: i.ModTime(),
-	}
-}
-
-func updateInfo(r *os.File, n Info) (Info, error) {
-	defer r.Close()
-
-	digest := xxh.New64(0)
-	_, err := io.Copy(digest, r)
-	if err == nil {
-		n.Sum = digest.Sum64()
-	}
-	return n, err
 }
