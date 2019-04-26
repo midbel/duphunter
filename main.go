@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+  "github.com/pkg/profile"
 	"github.com/midbel/xxh"
 )
 
@@ -21,6 +22,8 @@ type Info struct {
 }
 
 func main() {
+  defer profile.Start(profile.CPUProfile).Stop()
+
 	adv := flag.Bool("with-progress", false, "show progress")
 	del := flag.Bool("d", false, "delete duplicate files")
 	by := flag.String("b", "", "compare files by hash or properties")
@@ -84,13 +87,11 @@ func scanFiles(dir string, groupby func(Info) Info, adv bool) (map[Info][]Info, 
 		go progress(quit)
 	}
 
-	sema := make(chan struct{}, 4)
 	files := make(map[Info][]Info)
 	err := filepath.Walk(dir, func(p string, i os.FileInfo, err error) error {
 		if err != nil || i.IsDir() {
 			return err
 		}
-		sema <- struct{}{}
 
 		r, err := os.Open(p)
 		if err != nil {
@@ -175,7 +176,6 @@ func progress(done <-chan int) {
 			}
 			c.Size += n
 			c.Count++
-		default:
 		}
 		c.Written += w
 	}
