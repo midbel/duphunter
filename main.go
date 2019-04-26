@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +21,7 @@ type Info struct {
 }
 
 func main() {
+	del := flag.Bool("d", false, "delete duplicate files")
 	by := flag.String("b", "", "compare files by hash or properties")
 	flag.Parse()
 
@@ -36,10 +37,14 @@ func main() {
 	}{}
 	for n := range files {
 		fs := files[n]
+		sort.Slice(fs, func(i, j int) bool { return fs[i].Time.Before(fs[j].Time) })
 		for i, z := 0, len(fs); i < z; i++ {
 			printLine(fs[i], z > 1)
-			c.Size += fs[0].Size
+			c.Size += fs[i].Size
 			c.Dupl++
+			if *del && z > 1 && i > 0 {
+				os.Remove(fs[i].Name)
+			}
 		}
 		c.Dupl--
 		c.Uniq++
@@ -50,32 +55,19 @@ func main() {
 	fmt.Printf("%d files scanned - found %d duplicates\n", c.Uniq, c.Dupl)
 }
 
-var (
-	// green = []byte{0x1b, '[', '3', '2', ';', '1', '0', '7', 'm'}
-	// red   = []byte{0x1b, '[', '3', '1', ';', '1', '0', '7', 'm'}
-	green = []byte{0x1b, '[', '3', '8', ';', '5', ';', '2', 'm'}
-	red   = []byte{0x1b, '[', '3', '8', ';', '5', ';', '1', 'm'}
-	reset = []byte{0x1b, '[', '0', 'm'}
-)
-
 const (
-	OK = "[ OK ]"
-	KO = "[ KO ]"
+	OK = "\x1b[38;5;2m[ OK ]\x1b[0m"
+	KO = "\x1b[38;5;1m[ KO ]\x1b[0m"
 )
 
 func printLine(n Info, dup bool) {
-	var line bytes.Buffer
+	var prefix string
 	if !dup {
-		line.Write(green)
-		line.WriteString(OK)
+		prefix = OK
 	} else {
-		line.Write(red)
-		line.WriteString(KO)
+		prefix = KO
 	}
-	line.Write(reset)
-	line.WriteString(fmt.Sprintf(" %016x  %s  %s\n", n.Sum, prettySize(n.Size), n.Name))
-
-	io.Copy(os.Stdout, &line)
+	fmt.Fprintf(os.Stdout, "%s %016x  %s  %s\n", prefix, n.Sum, prettySize(n.Size), n.Name)
 }
 
 const (
@@ -101,7 +93,7 @@ func prettySize(v int64) string {
 	case v >= mebi && v < gibi:
 		mod, div, unit = mebi, 10000, 'M'
 	case v >= gibi:
-		mod, unit = gibi, 'G'
+		mod, div, unit = gibi, 10000000, 'G'
 	}
 	rest := (v % mod) / div
 	if rest < ten {
