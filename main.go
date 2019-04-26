@@ -43,6 +43,7 @@ func (i *Info) Update() error {
 }
 
 func main() {
+  all := flag.Bool("a", false, "all files")
 	del := flag.Bool("d", false, "delete duplicate files")
 	flag.Parse()
 
@@ -62,7 +63,12 @@ func main() {
 		}
 		c.Uniq++
 
-		line.AppendString(state, 6, linewriter.AlignCenter)
+    if !*all && n.Uniq() {
+      continue
+    }
+    if *all {
+      line.AppendString(state, 6, linewriter.AlignCenter)
+    }
 		line.AppendUint(n.Sum, 16, linewriter.Hex|linewriter.WithZero)
 		line.AppendSize(n.Size, 7, linewriter.AlignRight)
 		line.AppendString(n.Name, 0, linewriter.AlignLeft)
@@ -85,6 +91,7 @@ func checkFiles(files <-chan Info) <-chan Info {
 		for f := range files {
 			err := f.Update()
 			if err != nil {
+        fmt.Println("update", err)
 				return
 			}
 
@@ -107,7 +114,7 @@ func scanFiles(dirs []string) <-chan Info {
 				if err != nil {
 					return err
 				}
-				if i.IsDir() {
+				if i.IsDir() || !i.Mode().IsRegular() {
 					return nil
 				}
 				queue <- Info{
