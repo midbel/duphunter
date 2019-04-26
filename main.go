@@ -6,109 +6,100 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
-  "github.com/pkg/profile"
+	"github.com/midbel/linewriter"
 	"github.com/midbel/xxh"
+)
+
+const (
+	OK = "\x1b[38;5;2m[ OK ]\x1b[0m"
+	KO = "\x1b[38;5;1m[ KO ]\x1b[0m"
 )
 
 type Info struct {
 	Name string
 	Size int64
 	Sum  uint64
+	Seen int
 	time.Time
 }
 
 func main() {
-  defer profile.Start(profile.CPUProfile).Stop()
-
-	adv := flag.Bool("with-progress", false, "show progress")
 	del := flag.Bool("d", false, "delete duplicate files")
-	by := flag.String("b", "", "compare files by hash or properties")
 	flag.Parse()
 
-	group, err := groupBy(strings.ToLower(*by))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	files, err := scanFiles(flag.Arg(0), group, *adv)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
 	c := struct {
 		Uniq int64
 		Dupl int64
 		Size int64
 	}{}
-	for n := range files {
-		fs := files[n]
-		sort.Slice(fs, func(i, j int) bool { return fs[i].Time.Before(fs[j].Time) })
-		for i, z := 0, len(fs); i < z; i++ {
-			printLine(fs[i], z > 1)
-			c.Size += fs[i].Size
+	line := linewriter.NewWriter(1024, linewriter.WithPadding([]byte(" ")))
+	for n := range checkFiles(scanFiles(flag.Args())) {
+		var state string
+		if n.Seen > 1 {
+			state = KO
 			c.Dupl++
-			if *del && z > 1 && i > 0 {
-				os.Remove(fs[i].Name)
-			}
+		} else {
+			state = OK
 		}
-		c.Dupl--
 		c.Uniq++
-	}
-	if c.Dupl < 0 {
-		c.Dupl = 0
+
+		line.AppendString(state, 6, linewriter.AlignCenter)
+		line.AppendUint(n.Sum, 16, linewriter.Hex|linewriter.WithZero)
+		line.AppendSize(n.Size, 7, linewriter.AlignRight)
+		line.AppendString(n.Name, 0, linewriter.AlignLeft)
+
+		if *del {
+			os.Remove(n.Name)
+		}
+		io.Copy(os.Stdout, line)
 	}
 	fmt.Fprintf(os.Stdout, "%d files scanned - found %d duplicates", c.Uniq, c.Dupl)
 	fmt.Fprintln(os.Stdout)
 }
 
-func groupBy(by string) (func(Info) Info, error) {
-	var groupby func(Info) Info
-	switch strings.ToLower(by) {
-	case "", "hash":
-		groupby = bySum
-	case "name":
-		groupby = byName
-	default:
-		return nil, fmt.Errorf("unsupported grouping value %s", by)
-	}
-	return groupby, nil
+func checkFiles(files <-chan Info) <-chan Info {
+	queue := make(chan Info)
+	go func() {
+		defer close(queue)
+
+		seen := make(map[uint64]int)
+		for f := range files {
+			r, err := os.Open(f.Name)
+			if err != nil {
+				return
+			}
+			if n, err := updateInfo(r, f); err == nil {
+				seen[n.Sum]++
+				n.Seen = seen[n.Sum]
+
+				queue <- n
+			}
+		}
+	}()
+	return queue
 }
 
-func scanFiles(dir string, groupby func(Info) Info, adv bool) (map[Info][]Info, error) {
-	var quit chan int
-	if adv {
-		quit = make(chan int, 100)
-		defer close(quit)
+func scanFiles(dirs []string) <-chan Info {
+	queue := make(chan Info)
+	go func() {
+		defer close(queue)
 
-		go progress(quit)
-	}
-
-	files := make(map[Info][]Info)
-	err := filepath.Walk(dir, func(p string, i os.FileInfo, err error) error {
-		if err != nil || i.IsDir() {
-			return err
+		for i := 0; i < len(dirs); i++ {
+			filepath.Walk(dirs[i], func(p string, i os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+				if i.IsDir() {
+					return nil
+				}
+				queue <- infoFromInfo(p, i)
+				return nil
+			})
 		}
-
-		r, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		n, err := updateInfo(r, infoFromInfo(p, i))
-		if err == nil {
-			select {
-			case quit <- int(n.Size):
-			default:
-			}
-			k := groupby(n)
-			files[k] = append(files[k], n)
-		}
-		return err
-	})
-	return files, err
+	}()
+	return queue
 }
 
 func infoFromInfo(p string, i os.FileInfo) Info {
@@ -128,103 +119,4 @@ func updateInfo(r *os.File, n Info) (Info, error) {
 		n.Sum = digest.Sum64()
 	}
 	return n, err
-}
-
-func byName(n Info) Info {
-	n.Sum = 0
-	return n
-}
-
-func bySum(n Info) Info {
-	var t time.Time
-	n.Name, n.Size, n.Time = "", 0, t
-	return n
-}
-
-func progress(done <-chan int) {
-	clear := func(n int) int {
-		fmt.Fprint(os.Stdout, "\x1b[1K")
-		fmt.Fprintf(os.Stdout, "\x1b[%dD", n)
-		return 0
-	}
-
-	c := struct {
-		Written int
-		Count   int
-		Size    int
-		Tmp     int
-	}{}
-	tick := time.Tick(time.Millisecond * 625)
-	for {
-		var w int
-		select {
-		case <-tick:
-			c.Tmp++
-			if c.Tmp > 0 && c.Tmp%4 == 0 {
-				clear(c.Written)
-				c.Written, c.Tmp = 0, 0
-
-				s := prettySize(int64(c.Size))
-				w, _ = fmt.Fprintf(os.Stdout, "%d files scanned (%s)", c.Count, strings.TrimSpace(s))
-			} else {
-				w, _ = fmt.Fprint(os.Stdout, ".")
-			}
-		case n, ok := <-done:
-			if !ok {
-				clear(c.Written)
-				return
-			}
-			c.Size += n
-			c.Count++
-		}
-		c.Written += w
-	}
-}
-
-const (
-	ten  = 10
-	kibi = 1000
-	mebi = kibi * kibi
-	gibi = mebi * kibi
-)
-
-func prettySize(v int64) string {
-	var (
-		unit byte
-		mod  int64
-		div  int64
-	)
-
-	div = 1
-	switch {
-	default:
-		mod, unit = 1, 'B'
-	case v >= kibi && v < mebi:
-		mod, div, unit = kibi, 10, 'K'
-	case v >= mebi && v < gibi:
-		mod, div, unit = mebi, 10000, 'M'
-	case v >= gibi:
-		mod, div, unit = gibi, 10000000, 'G'
-	}
-	rest := (v % mod) / div
-	if rest < ten {
-		rest *= ten
-	}
-	return fmt.Sprintf("%3d.%02d%c", v/mod, rest, unit)
-}
-
-const (
-	OK = "\x1b[38;5;2m[ OK ]\x1b[0m"
-	KO = "\x1b[38;5;1m[ KO ]\x1b[0m"
-)
-
-func printLine(n Info, dup bool) {
-	var prefix string
-	if !dup {
-		prefix = OK
-	} else {
-		prefix = KO
-	}
-	fmt.Fprintf(os.Stdout, "%s %016x  %s  %s", prefix, n.Sum, prettySize(n.Size), n.Name)
-	fmt.Fprintln(os.Stdout)
 }
