@@ -156,16 +156,10 @@ func runDup(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := x.Update(); err != nil {
-		return err
-	}
 	line := Line()
 	for j := 1; j < cmd.Flag.NArg(); j++ {
 		n, err := infoFromPath(cmd.Flag.Arg(j))
 		if err != nil {
-			continue
-		}
-		if err := n.Update(); err != nil {
 			continue
 		}
 		if !*all && (x.Sum != n.Sum || x.Name == n.Name) {
@@ -198,16 +192,10 @@ func runSim(cmd *cli.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := n.Update(); err != nil {
-		return err
-	}
 	line := Line()
 	for j := 1; j < cmd.Flag.NArg(); j++ {
 		x, err := infoFromPath(cmd.Flag.Arg(j))
 		if err != nil {
-			continue
-		}
-		if err := x.Update(); err != nil {
 			continue
 		}
 		dist := n.Distance(x)
@@ -282,7 +270,7 @@ func infoFromPath(p string) (Info, error) {
 			err = fmt.Errorf("%s not a regular file", p)
 		}
 	}
-	return n, err
+	return n, n.Update()
 }
 
 func infoFromInfo(p string, i os.FileInfo) Info {
