@@ -59,22 +59,22 @@ func (i *Info) Update() error {
 var commands = []*cli.Command{
 	{
 		Usage: "list <dir...>",
-		Short: "",
+		Short: "find any file that is a duplicate of another file",
 		Run:   runList,
 	},
 	{
 		Usage: "similar <file> <other...>",
-		Short: "",
-		Run:   runSim,
+		Short: "check if a file has similar files in the set of given files",
+		Run:   isSimilar,
 	},
 	{
 		Usage: "duplicate <file> <other...>",
-		Short: "",
-		Run:   runDup,
+		Short: "check if a file has duplicate file in the set of given files",
+		Run:   isDuplicate,
 	},
 }
 
-const helpText = `{{.Name}} scan the HRDP archive to consolidate the USOC HRDP archive
+const helpText = `{{.Name}} looks for similar files
 
 Usage:
 
@@ -90,10 +90,11 @@ Use {{.Name}} [command] -h for more information about its usage.
 func main() {
 	defer func() {
 		if err := recover(); err != nil {
-			fmt.Fprintf(os.Stderr, "unexpected error: %s\n", err)
+			fmt.Fprintf(os.Stderr, "unexpected error: %s", err)
+			fmt.Fprintln(os.Stderr)
 		}
 	}()
-	if err := cli.Run(commands, cli.Usage("tmcat", helpText, commands), nil); err != nil {
+	if err := cli.Run(commands, cli.Usage("duphunter", helpText, commands), nil); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(6)
 	}
@@ -147,7 +148,7 @@ func runList(cmd *cli.Command, args []string) error {
 	return nil
 }
 
-func runDup(cmd *cli.Command, args []string) error {
+func isDuplicate(cmd *cli.Command, args []string) error {
 	all := cmd.Flag.Bool("a", false, "show all files")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
@@ -183,7 +184,7 @@ func runDup(cmd *cli.Command, args []string) error {
 	return nil
 }
 
-func runSim(cmd *cli.Command, args []string) error {
+func isSimilar(cmd *cli.Command, args []string) error {
 	threshold := cmd.Flag.Float64("p", 0.0, "threshold")
 	if err := cmd.Flag.Parse(args); err != nil {
 		return err
