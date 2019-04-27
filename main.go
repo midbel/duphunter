@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,17 +33,8 @@ type Info struct {
 }
 
 func (i Info) Distance(n Info) float64 {
-	var score float64
-
-	curr, other := i.Sim, n.Sim
-	for j := 0; j < 32; j++ {
-		c, o := curr&0x1, other&0x1
-		if c != o {
-			score++
-		}
-		curr, other = curr>>1, other>>1
-	}
-	return 1 - (score / 32)
+	not := i.Sim ^ n.Sim
+	return 1 - (float64(bits.OnesCount32(not)) / 32)
 }
 
 func (i *Info) Uniq() bool {
@@ -308,13 +300,14 @@ type simhash struct {
 
 func Simhash() hash.Hash32 {
 	return &simhash{
-		calculate: djb2,
+		calculate: bernstein,
 		state:     make([]int, 32),
 	}
 }
 
 func (s *simhash) Write(bs []byte) (int, error) {
 	hs := s.calculate(bs)
+
 	for i := 0; i < len(s.state); i++ {
 		if bit := hs & 0x1; bit == 1 {
 			s.state[i]++
@@ -323,13 +316,14 @@ func (s *simhash) Write(bs []byte) (int, error) {
 		}
 		hs = hs >> 1
 	}
+
 	return len(bs), nil
 }
 
-func djb2(bs []byte) uint32 {
+func bernstein(bs []byte) uint32 {
 	hs := uint32(5381)
 	for i := 0; i < len(bs); i++ {
-		hs = hs*33 + uint32(bs[i])
+		hs = 33*hs + uint32(bs[i])
 	}
 	return hs
 }
