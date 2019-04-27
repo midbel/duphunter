@@ -26,7 +26,7 @@ type Info struct {
 
 	time.Time
 
-	Sim uint32
+	Sim uint64
 	Sum uint64
 
 	Seen int
@@ -34,7 +34,7 @@ type Info struct {
 
 func (i Info) Distance(n Info) float64 {
 	not := i.Sim ^ n.Sim
-	return 1 - (float64(bits.OnesCount32(not)) / 32)
+	return 1 - (float64(bits.OnesCount64(not)) / 64)
 }
 
 func (i *Info) Uniq() bool {
@@ -51,7 +51,7 @@ func (i *Info) Update() error {
 	}
 	if _, err = io.Copy(io.MultiWriter(sim, digest), r); err == nil {
 		i.Sum = digest.Sum64()
-		i.Sim = sim.Sum32()
+		i.Sim = sim.Sum64()
 	}
 	return err
 }
@@ -294,14 +294,14 @@ func infoFromInfo(p string, i os.FileInfo) Info {
 }
 
 type simhash struct {
-	calculate func([]byte) uint32
+	calculate func([]byte) uint64
 	state     []int
 }
 
-func Simhash() hash.Hash32 {
+func Simhash() hash.Hash64 {
 	return &simhash{
 		calculate: bernstein,
-		state:     make([]int, 32),
+		state:     make([]int, 64),
 	}
 }
 
@@ -320,29 +320,29 @@ func (s *simhash) Write(bs []byte) (int, error) {
 	return len(bs), nil
 }
 
-func bernstein(bs []byte) uint32 {
-	hs := uint32(5381)
+func bernstein(bs []byte) uint64 {
+	hs := uint64(5381)
 	for i := 0; i < len(bs); i++ {
-		hs = 33*hs + uint32(bs[i])
+		hs = 33*hs + uint64(bs[i])
 	}
 	return hs
 }
 
 func (s *simhash) Reset() {
-	s.state = make([]int, 0)
+	s.state = make([]int, len(s.state))
 }
 
 func (s *simhash) Sum(bs []byte) []byte {
-	if len(bs) < 4 {
-		bs = make([]byte, 4)
+	if len(bs) < 8 {
+		bs = make([]byte, 8)
 	}
 	return bs
 }
 
-func (s *simhash) Sum32() uint32 {
+func (s *simhash) Sum64() uint64 {
 	defer s.Reset()
 
-	var state uint32
+	var state uint64
 	for i := len(s.state) - 1; i >= 0; i-- {
 		if s.state[i] > 0 {
 			state |= 1
@@ -353,4 +353,4 @@ func (s *simhash) Sum32() uint32 {
 }
 
 func (s *simhash) BlockSize() int { return 4096 }
-func (s *simhash) Size() int      { return 4 }
+func (s *simhash) Size() int      { return 8 }
