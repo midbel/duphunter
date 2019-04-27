@@ -220,7 +220,7 @@ func runSim(cmd *cli.Command, args []string) error {
 			}
 			line.AppendString(state, 6, linewriter.AlignCenter)
 		}
-		line.AppendUint(uint64(x.Sim), 8, linewriter.WithZero|linewriter.Hex)
+		line.AppendUint(uint64(x.Sim), 16, linewriter.WithZero|linewriter.Hex)
 		line.AppendPercent(dist, 7, 2, linewriter.AlignRight)
 		line.AppendString(x.Name, 0, linewriter.AlignLeft)
 
