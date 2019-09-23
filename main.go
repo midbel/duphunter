@@ -94,10 +94,7 @@ func main() {
 			fmt.Fprintln(os.Stderr)
 		}
 	}()
-	if err := cli.Run(commands, cli.Usage("duphunter", helpText, commands), nil); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(6)
-	}
+	cli.RunAndExit(commands, cli.Usage("duphunter", helpText, commands))
 }
 
 func Line() *linewriter.Writer {
